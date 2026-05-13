@@ -1,8 +1,8 @@
 import numpy as np
-from scipy.optimize import minimize
 import config
 
 def marchenko_pastur_lambda_plus(n, T):
+    """Upper bound of Marchenko‑Pastur distribution."""
     sigma = 1.0
     q = n / T
     lambda_plus = sigma ** 2 * (1 + np.sqrt(q)) ** 2
@@ -10,50 +10,56 @@ def marchenko_pastur_lambda_plus(n, T):
 
 def power_law_mle(data):
     """
-    Fit power law p(x) ~ x^{-gamma} for x >= x_min.
-    Use MLE: gamma = 1 + n * ( sum(log(x_i / x_min)) )^{-1}
-    x_min is the smallest value in data.
+    MLE for power‑law exponent gamma.
+    Assumes data >= x_min, where x_min = min(data).
+    Returns gamma, x_min.
     """
     x_min = np.min(data)
     n = len(data)
     if n == 0:
         return np.nan, np.nan
-    # log-likelihood: (gamma-1) * sum(log(x_i/x_min))
-    # MLE: gamma = 1 + n / sum(log(x_i/x_min))
     log_ratios = np.log(data / x_min)
     gamma = 1 + n / np.sum(log_ratios)
     return gamma, x_min
 
 def compute_criticality(returns_df, window):
+    """
+    Compute criticality metrics for a given window.
+    """
     if len(returns_df) < window:
         return None
     data = returns_df.iloc[-window:].dropna(axis=1, how='any')
     if data.shape[1] < 5:
         return None
+
     corr = data.corr().values
     eigvals, eigvecs = np.linalg.eigh(corr)
-    eigvals = eigvals[::-1]
+    eigvals = eigvals[::-1]               # descending
     eigvecs = eigvecs[:, ::-1]
+
     n = eigvals.shape[0]
     T = window
     lambda_mp = marchenko_pastur_lambda_plus(n, T)
-    # Select eigenvalues > lambda_mp
+
+    # eigenvalues larger than Marchenko‑Pastur upper bound
     tail_eigs = eigvals[eigvals > lambda_mp]
     if len(tail_eigs) < config.MIN_EIGENVALUES:
         gamma = np.nan
     else:
         gamma, _ = power_law_mle(tail_eigs)
-    # Participation ratio and influence
+
+    # participation of each ETF in the largest eigenvector
     v = eigvecs[:, 0]
     influence = v ** 2
     etf_names = data.columns.tolist()
     top_idx = np.argsort(influence)[::-1][:config.TOP_N]
     top_etfs = [{"ticker": etf_names[i], "influence": float(influence[i])} for i in top_idx]
-    # Criticality score and cash allocation
+
+    # cash allocation based on criticality
     if not np.isnan(gamma):
         if config.GAMMA_CRITICAL_LOW <= gamma <= config.GAMMA_CRITICAL_HIGH:
             distance_to_critical = 0.0
-            cash_allocation = 0.2
+            cash_allocation = 0.20   # 20% cash near critical
         elif gamma < config.GAMMA_CRITICAL_LOW:
             distance_to_critical = config.GAMMA_CRITICAL_LOW - gamma
             cash_allocation = 0.05
@@ -71,5 +77,5 @@ def compute_criticality(returns_df, window):
         "distance_to_critical": float(distance_to_critical) if not np.isnan(distance_to_critical) else None,
         "cash_allocation": float(cash_allocation),
         "top_etfs": top_etfs,
-        "participation_ratio": float(np.sum(v**4))
+        "participation_ratio": float(np.sum(v ** 4))
     }
