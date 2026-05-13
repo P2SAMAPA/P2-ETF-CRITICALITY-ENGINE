@@ -7,6 +7,19 @@ import config
 import data_manager
 from criticality import compute_criticality
 
+def convert_to_serializable(obj):
+    if isinstance(obj, np.ndarray):
+        return obj.tolist()
+    if isinstance(obj, np.floating):
+        return float(obj)
+    if isinstance(obj, np.integer):
+        return int(obj)
+    if isinstance(obj, dict):
+        return {k: convert_to_serializable(v) for k, v in obj.items()}
+    if isinstance(obj, (list, tuple)):
+        return [convert_to_serializable(i) for i in obj]
+    return obj
+
 def main():
     if not config.HF_TOKEN:
         print("HF_TOKEN not set")
@@ -32,13 +45,17 @@ def main():
             if crit is None:
                 continue
             universe_crit[f"window_{win}"] = crit
-            print(f"  Window {win}d: gamma={crit['gamma']:.3f}, cash_alloc={crit['cash_allocation']:.0%}")
-            # Also print top ETFs by influence for this window
+            gamma = crit['gamma']
+            if gamma is not None:
+                print(f"  Window {win}d: gamma={gamma:.3f}, cash_alloc={crit['cash_allocation']:.0%}")
+            else:
+                print(f"  Window {win}d: gamma insufficient data, cash_alloc={crit['cash_allocation']:.0%}")
+            # print top ETFs for this window
             top = crit['top_etfs']
-            print(f"    Top ETFs: {[e['ticker'] for e in top]}")
+            if top:
+                print(f"    Top ETFs: {[e['ticker'] for e in top]}")
 
-        # For dashboard, we want the latest window's top ETFs (e.g., 252d)
-        # Choose the largest window that succeeded
+        # For dashboard, choose the largest window that succeeded
         best_win = None
         for win in sorted(config.WINDOWS, reverse=True):
             if f"window_{win}" in universe_crit:
@@ -58,7 +75,7 @@ def main():
     Path("results").mkdir(exist_ok=True)
     local_path = Path(f"results/criticality_{today}.json")
     with open(local_path, "w") as f:
-        json.dump({"run_date": today, "universes": all_results}, f, indent=2)
+        json.dump(convert_to_serializable({"run_date": today, "universes": all_results}), f, indent=2)
 
     import push_results
     push_results.push_daily_result(local_path)
