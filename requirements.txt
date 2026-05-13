@@ -1,0 +1,7 @@
+numpy
+pandas
+scipy
+powerlaw
+huggingface-hub
+streamlit
+plotly
